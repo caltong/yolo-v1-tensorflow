@@ -120,8 +120,7 @@ class YOLONet(object):
                 net = tf.pad(
                     net, np.array([[0, 0], [1, 1], [1, 1], [0, 0]]),
                     name='pad_27')
-                net = slim.conv2d(
-                    net, 1024, 3, 2, padding='VALID', scope='conv_28')
+                net = slim.conv2d(net, 1024, 3, 2, padding='VALID', scope='conv_28')
                 net = slim.conv2d(net, 1024, 3, scope='conv_29')
                 net = slim.conv2d(net, 1024, 3, scope='conv_30')
                 net = tf.transpose(net, [0, 3, 1, 2], name='trans_31')
@@ -131,8 +130,7 @@ class YOLONet(object):
                 net = slim.dropout(
                     net, keep_prob=keep_prob, is_training=is_training,
                     scope='dropout_35')
-                net = slim.fully_connected(
-                    net, num_outputs, activation_fn=None, scope='fc_36')
+                net = slim.fully_connected(net, num_outputs, activation_fn=None, scope='fc_36')
         return net
 
     def calc_iou(self, boxes1, boxes2, scope='iou'):
@@ -140,6 +138,13 @@ class YOLONet(object):
         Args:
           boxes1: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4]  ====> (x_center, y_center, w, h)
           boxes2: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4] ===> (x_center, y_center, w, h)
+        Return:
+          iou: 4-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
+        这个函数的主要作用是计算两个 bounding box 之间的 IoU。输入是两个 5 维的bounding box,输出的两个 bounding Box 的IoU
+        Args:
+          boxes1: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4]  ====> (x_center, y_center, w, h)
+          boxes2: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4] ===> (x_center, y_center, w, h)
+          注意这里的参数x_center, y_center, w, h都是归一到[0,1]之间的，分别表示预测边界框的中心相对整张图片的坐标，宽和高
         Return:
           iou: 4-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
         """
@@ -174,6 +179,18 @@ class YOLONet(object):
         return tf.clip_by_value(inter_square / union_square, 0.0, 1.0)
 
     def loss_layer(self, predicts, labels, scope='loss_layer'):
+        """
+        计算预测和标签之间的损失函数
+            args：
+                predicts：Yolo网络的输出 形状[None,1470]
+                0：7*7*20：表示预测类别
+                7*7*20:7*7*20 + 7*7*2:表示预测置信度，即预测的边界框与实际边界框之间的IOU
+                7*7*20 + 7*7*2：1470：预测边界框    目标中心是相对于当前格子的，宽度和高度的开根号是相对当前整张图像的(归一化的)
+                labels：标签值 形状[None,7,7,25]
+                0:1：置信度，表示这个地方是否有目标
+                1:5：目标边界框  目标中心，宽度和高度(没有归一化)
+                5:25：目标的类别
+        """
         with tf.variable_scope(scope):
             predict_classes = tf.reshape(
                 predicts[:, :self.boundary1],
