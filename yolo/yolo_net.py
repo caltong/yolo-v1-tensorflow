@@ -8,45 +8,57 @@ slim = tf.contrib.slim
 class YOLONet(object):
 
     def __init__(self, is_training=True):
-        self.classes = cfg.CLASSES
-        self.num_class = len(self.classes)
-        self.image_size = cfg.IMAGE_SIZE
-        self.cell_size = cfg.CELL_SIZE
-        self.boxes_per_cell = cfg.BOXES_PER_CELL
-        self.output_size = (self.cell_size * self.cell_size) *\
-            (self.num_class + self.boxes_per_cell * 5)
-        self.scale = 1.0 * self.image_size / self.cell_size
-        self.boundary1 = self.cell_size * self.cell_size * self.num_class
-        self.boundary2 = self.boundary1 +\
-            self.cell_size * self.cell_size * self.boxes_per_cell
+        """
+            构造函数
+            利用 cfg 文件对网络参数进行初始化，同时定义网络的输入和输出 size 等信息，
+            其中 offset 的作用应该是一个定长的偏移
+            boundery1和boundery2 作用是在输出中确定每种信息的长度（如类别，置信度等）。
+            其中
+            boundery1 指的是对于所有的 cell 的类别的预测的张量维度，所以是 self.cell_size * self.cell_size * self.num_class
+            boundery2 指的是在类别之后每个cell 所对应的 bounding boxes 的数量的总和，所以是self.boundary1 + self.cell_size * self.cell_size * self.boxes_per_cell
 
-        self.object_scale = cfg.OBJECT_SCALE
-        self.noobject_scale = cfg.NOOBJECT_SCALE
-        self.class_scale = cfg.CLASS_SCALE
-        self.coord_scale = cfg.COORD_SCALE
+            args:
+                is_training：训练？
+        """
+        self.classes = cfg.CLASSES  # 类别
+        self.num_class = len(self.classes)  # 类别数量20
+        self.image_size = cfg.IMAGE_SIZE  # 图像尺寸448
+        self.cell_size = cfg.CELL_SIZE  # cell尺寸7
+        self.boxes_per_cell = cfg.BOXES_PER_CELL  # 每个grid cell负责的box数量，文论中为2
+        self.output_size = (self.cell_size * self.cell_size) * \
+                           (self.num_class + self.boxes_per_cell * 5)  # 输出尺寸(7*7)*(20+2*5)
+        self.scale = 1.0 * self.image_size / self.cell_size  # 图像尺寸和cell尺寸比例
+        self.boundary1 = self.cell_size * self.cell_size * self.num_class  # 7*7*20
+        self.boundary2 = self.boundary1 + \
+                         self.cell_size * self.cell_size * self.boxes_per_cell  # 7*7*20 + 7*7*2
 
-        self.learning_rate = cfg.LEARNING_RATE
-        self.batch_size = cfg.BATCH_SIZE
-        self.alpha = cfg.ALPHA
+        self.object_scale = cfg.OBJECT_SCALE  # 值为1.0
+        self.noobject_scale = cfg.NOOBJECT_SCALE  # 值为1.0
+        self.class_scale = cfg.CLASS_SCALE  # 值为2.0
+        self.coord_scale = cfg.COORD_SCALE  # 值为5.0
+
+        self.learning_rate = cfg.LEARNING_RATE  # 学习速率LEARNING_RATE = 0.0001
+        self.batch_size = cfg.BATCH_SIZE  # BATCH_SIZE = 45
+        self.alpha = cfg.ALPHA  # ALPHA = 0.1
 
         self.offset = np.transpose(np.reshape(np.array(
             [np.arange(self.cell_size)] * self.cell_size * self.boxes_per_cell),
-            (self.boxes_per_cell, self.cell_size, self.cell_size)), (1, 2, 0))
+            (self.boxes_per_cell, self.cell_size, self.cell_size)), (1, 2, 0))  # 偏置 形状为 (7,7,2)
 
         self.images = tf.placeholder(
             tf.float32, [None, self.image_size, self.image_size, 3],
-            name='images')
+            name='images')  # 输入图片 (None,448,448,3)
         self.logits = self.build_network(
             self.images, num_outputs=self.output_size, alpha=self.alpha,
-            is_training=is_training)
+            is_training=is_training)  # 构建网络 获取网络输出 形状为 (None,1470)
 
         if is_training:
             self.labels = tf.placeholder(
                 tf.float32,
-                [None, self.cell_size, self.cell_size, 5 + self.num_class])
-            self.loss_layer(self.logits, self.labels)
-            self.total_loss = tf.losses.get_total_loss()
-            tf.summary.scalar('total_loss', self.total_loss)
+                [None, self.cell_size, self.cell_size, 5 + self.num_class])  # 标签 (None,7,7,25)
+            self.loss_layer(self.logits, self.labels)  # 损失函数
+            self.total_loss = tf.losses.get_total_loss()  # 加入权重之后的损失函数
+            tf.summary.scalar('total_loss', self.total_loss)  # 将损失以标量形式显示 命名为total_loss
 
     def build_network(self,
                       images,
@@ -55,16 +67,30 @@ class YOLONet(object):
                       keep_prob=0.5,
                       is_training=True,
                       scope='yolo'):
-        with tf.variable_scope(scope):
-            with slim.arg_scope(
-                [slim.conv2d, slim.fully_connected],
-                activation_fn=leaky_relu(alpha),
-                weights_regularizer=slim.l2_regularizer(0.0005),
-                weights_initializer=tf.truncated_normal_initializer(0.0, 0.01)
+        """
+            构建YOLO网络
+
+            args:
+                images：输入图片占位符 [None,image_size,image_size,3]  这里是[None,448,448,3]
+                num_outputs：标量，网络输出节点数 1470
+                alpha：泄露修正线性激活函数 系数0.1
+                keep_prob：弃权 保留率
+                is_training：训练？
+                scope：命名空间名
+
+            return：
+                返回网络最后一层，激活函数处理之前的值  形状[None,1470]
+        """
+        with tf.variable_scope(scope):  # 定义变量命名空间
+            with slim.arg_scope(  # 定义共享参数 使用L2正则化
+                    [slim.conv2d, slim.fully_connected],
+                    activation_fn=leaky_relu(alpha),
+                    weights_regularizer=slim.l2_regularizer(0.0005),
+                    weights_initializer=tf.truncated_normal_initializer(0.0, 0.01)
             ):
                 net = tf.pad(
                     images, np.array([[0, 0], [3, 3], [3, 3], [0, 0]]),
-                    name='pad_1')
+                    name='pad_1')  # pad_1填充 
                 net = slim.conv2d(
                     net, 64, 7, 2, padding='VALID', scope='conv_2')
                 net = slim.max_pool2d(net, 2, padding='SAME', scope='pool_3')
@@ -242,4 +268,5 @@ class YOLONet(object):
 def leaky_relu(alpha):
     def op(inputs):
         return tf.nn.leaky_relu(inputs, alpha=alpha, name='leaky_relu')
+
     return op
