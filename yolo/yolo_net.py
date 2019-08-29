@@ -90,9 +90,9 @@ class YOLONet(object):
             ):
                 net = tf.pad(
                     images, np.array([[0, 0], [3, 3], [3, 3], [0, 0]]),
-                    name='pad_1')  # pad_1填充 
-                net = slim.conv2d(
-                    net, 64, 7, 2, padding='VALID', scope='conv_2')
+                    name='pad_1')  # pad_1填充成 (None,454,454,3)
+                # TODO 替换slim成keras
+                net = slim.conv2d(net, 64, 7, 2, padding='VALID', scope='conv_2')
                 net = slim.max_pool2d(net, 2, padding='SAME', scope='pool_3')
                 net = slim.conv2d(net, 192, 3, scope='conv_4')
                 net = slim.max_pool2d(net, 2, padding='SAME', scope='pool_5')
