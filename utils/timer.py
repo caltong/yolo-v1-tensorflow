@@ -3,9 +3,9 @@ import datetime
 
 
 class Timer(object):
-    '''
+    """
     A simple timer.
-    '''
+    """
 
     def __init__(self):
         self.init_time = time.time()
