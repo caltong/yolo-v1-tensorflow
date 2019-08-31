@@ -135,11 +135,6 @@ class YOLONet(object):
 
     def calc_iou(self, boxes1, boxes2, scope='iou'):
         """calculate ious
-        Args:
-          boxes1: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4]  ====> (x_center, y_center, w, h)
-          boxes2: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4] ===> (x_center, y_center, w, h)
-        Return:
-          iou: 4-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
         这个函数的主要作用是计算两个 bounding box 之间的 IoU。输入是两个 5 维的bounding box,输出的两个 bounding Box 的IoU
         Args:
           boxes1: 5-D tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL, 4]  ====> (x_center, y_center, w, h)
@@ -150,6 +145,7 @@ class YOLONet(object):
         """
         with tf.variable_scope(scope):
             # transform (x_center, y_center, w, h) to (x1, y1, x2, y2)
+            # 把以前的中心点坐标和长和宽转换成了左上角和右下角的两个点的坐标
             boxes1_t = tf.stack([boxes1[..., 0] - boxes1[..., 2] / 2.0,
                                  boxes1[..., 1] - boxes1[..., 3] / 2.0,
                                  boxes1[..., 0] + boxes1[..., 2] / 2.0,
