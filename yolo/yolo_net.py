@@ -250,11 +250,6 @@ class YOLONet(object):
             iou_predict_truth = self.calc_iou(predict_boxes_tran, boxes)
 
             # calculate I tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
-            object_mask = tf.reduce_max(iou_predict_truth, 3, keep_dims=True)
-            object_mask = tf.cast(
-                (iou_predict_truth >= object_mask), tf.float32) * response
-
-            # calculate no_I tensor [CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
             # 这个是求论文中的1ijobj参数，[45,7,7,2]     1ijobj：表示网格单元i的第j个编辑框预测器’负责‘该预测
             # 先计算每个框交并比最大的那个，因为我们知道，YOLO每个格子预测两个边界框，一个类别。在训练时，每个目标只需要
             # 一个预测器来负责，我们指定一个预测器"负责"，根据哪个预测器与真实值之间具有当前最高的IOU来预测目标。
@@ -262,45 +257,59 @@ class YOLONet(object):
             # 当格子中的确有目标时，取值为[1,1]，[1,0],[0,1]
             # 比如某一个格子的值为[1,0]，表示第一个边界框负责该格子目标的预测  [0,1]：表示第二个边界框负责该格子目标的预测
             # 当格子没有目标时，取值为[0,0]
+            object_mask = tf.reduce_max(iou_predict_truth, 3, keep_dims=True)
+            object_mask = tf.cast(
+                (iou_predict_truth >= object_mask), tf.float32) * response
+
+            # calculate no_I tensor [CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
+            # noobject_mask就表示每个边界框不负责该目标的置信度，
+            # 使用tf.onr_like，使得全部为1,再减去有目标的，也就是有目标的对应坐标为1,这样一减，就变为没有的了。[45,7,7,2]
             noobject_mask = tf.ones_like(
                 object_mask, dtype=tf.float32) - object_mask
 
+            # boxes_tran 这个就是把之前的坐标换回来(相对整个图像->相对当前格子)，长和宽开方(原因在论文中有说明)，后面求loss就方便。 shape为(4, 45, 7, 7, 2)
             boxes_tran = tf.stack(
                 [boxes[..., 0] * self.cell_size - offset,
                  boxes[..., 1] * self.cell_size - offset_tran,
                  tf.sqrt(boxes[..., 2]),
                  tf.sqrt(boxes[..., 3])], axis=-1)
 
-            # class_loss
+            # class_loss 分类损失，如果目标出现在网格中 response为1，否则response为0  原文代价函数公式第5项
+            # 该项表名当格子中有目标时，预测的类别越接近实际类别，代价值越小  原文代价函数公式第5项
             class_delta = response * (predict_classes - classes)
             class_loss = tf.reduce_mean(
                 tf.reduce_sum(tf.square(class_delta), axis=[1, 2, 3]),
                 name='class_loss') * self.class_scale
 
-            # object_loss
+            # object_loss 有目标物体存在的置信度预测损失   原文代价函数公式第3项
+            # 该项表名当格子中有目标时，负责该目标预测的边界框的置信度越越接近预测的边界框与实际边界框之间的IOU时，代价值越小
             object_delta = object_mask * (predict_scales - iou_predict_truth)
             object_loss = tf.reduce_mean(
                 tf.reduce_sum(tf.square(object_delta), axis=[1, 2, 3]),
                 name='object_loss') * self.object_scale
 
-            # noobject_loss
+            # noobject_loss  没有目标物体存在的置信度的损失(此时iou_predict_truth为0)  原文代价函数公式第4项
+            # 该项表名当格子中没有目标时，预测的两个边界框的置信度越接近0，代价值越小
             noobject_delta = noobject_mask * predict_scales
             noobject_loss = tf.reduce_mean(
                 tf.reduce_sum(tf.square(noobject_delta), axis=[1, 2, 3]),
                 name='noobject_loss') * self.noobject_scale
 
-            # coord_loss
+            # coord_loss 边界框坐标损失 shape 为 [batch_size, 7, 7, 2, 1]  原文代价函数公式1,2项
+            # 该项表名当格子中有目标时，预测的边界框越接近实际边界框，代价值越小
             coord_mask = tf.expand_dims(object_mask, 4)
             boxes_delta = coord_mask * (predict_boxes - boxes_tran)
             coord_loss = tf.reduce_mean(
                 tf.reduce_sum(tf.square(boxes_delta), axis=[1, 2, 3, 4]),
                 name='coord_loss') * self.coord_scale
 
+            # 将所有损失放在一起
             tf.losses.add_loss(class_loss)
             tf.losses.add_loss(object_loss)
             tf.losses.add_loss(noobject_loss)
             tf.losses.add_loss(coord_loss)
 
+            # 将每个损失添加到日志记录
             tf.summary.scalar('class_loss', class_loss)
             tf.summary.scalar('object_loss', object_loss)
             tf.summary.scalar('noobject_loss', noobject_loss)
