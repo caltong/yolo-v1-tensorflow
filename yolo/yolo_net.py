@@ -200,37 +200,53 @@ class YOLONet(object):
                 5:25：目标的类别
         """
         with tf.variable_scope(scope):
+            # 将网络输出分离为类别和置信度以及边界框的大小，输出维度为7*7*20 + 7*7*2 + 7*7*2*4=1470
             predict_classes = tf.reshape(
                 predicts[:, :self.boundary1],
-                [self.batch_size, self.cell_size, self.cell_size, self.num_class])
+                [self.batch_size, self.cell_size, self.cell_size, self.num_class])  # 预测每个格子目标的类别 形状[45,7,7,20]
             predict_scales = tf.reshape(
                 predicts[:, self.boundary1:self.boundary2],
-                [self.batch_size, self.cell_size, self.cell_size, self.boxes_per_cell])
+                [self.batch_size, self.cell_size, self.cell_size, self.boxes_per_cell])  # 预测每个格子中两个边界框的置信度 形状[45,7,7,2]
             predict_boxes = tf.reshape(
                 predicts[:, self.boundary2:],
                 [self.batch_size, self.cell_size, self.cell_size, self.boxes_per_cell, 4])
-
+            # 预测每个格子中的两个边界框，(x,y)表示边界框相对于格子边界框的中心 w,h的开根号相对于整个图片  形状[45,7,7,2,4]
             response = tf.reshape(
                 labels[..., 0],
-                [self.batch_size, self.cell_size, self.cell_size, 1])
+                [self.batch_size, self.cell_size, self.cell_size, 1])  # 标签的置信度,表示这个地方是否有框 形状[45,7,7,1]
             boxes = tf.reshape(
                 labels[..., 1:5],
-                [self.batch_size, self.cell_size, self.cell_size, 1, 4])
+                [self.batch_size, self.cell_size, self.cell_size, 1, 4])  # 标签的边界框 (x,y)表示边界框相对于整个图片的中心 形状[45,7,7,1，4]
             boxes = tf.tile(
-                boxes, [1, 1, 1, self.boxes_per_cell, 1]) / self.image_size
+                boxes,
+                [1, 1, 1, self.boxes_per_cell, 1]) / self.image_size  # 标签的边界框 归一化后 张量沿着axis=3重复两边，扩充后[45,7,7,2,4]
             classes = labels[..., 5:]
 
+            """
+            predict_boxes_tran：offset变量用于把预测边界框predict_boxes中的坐标中心(x,y)由相对当前格子转换为相对当前整个图片
+            offset，这个是构造的[7,7,2]矩阵，每一行都是[7,2]的矩阵，值为[[0,0],[1,1],[2,2],[3,3],[4,4],[5,5],[6,6]]
+            这个变量是为了将每个cell的坐标对齐，后一个框比前一个框要多加1
+            比如我们预测了cell_size的每个中心点坐标，那么我们这个中心点落在第几个cell_size
+            就对应坐标要加几，这个用法比较巧妙，构造了这样一个数组，让他们对应位置相加
+            """
+            # offset shape为[1,7,7,2]  如果忽略axis=0，则每一行都是  [[0,0],[1,1],[2,2],[3,3],[4,4],[5,5],[6,6]]
             offset = tf.reshape(
                 tf.constant(self.offset, dtype=tf.float32),
                 [1, self.cell_size, self.cell_size, self.boxes_per_cell])
             offset = tf.tile(offset, [self.batch_size, 1, 1, 1])
+            ''
+            # shape为[45,7,7,2]  如果忽略axis=0 第i行为[[i,i],[i,i],[i,i],[i,i],[i,i],[i,i],[i,i]]
             offset_tran = tf.transpose(offset, (0, 2, 1, 3))
+
+            # shape为[45,7,7,2,4]  计算每个格子中的预测边界框坐标(x,y)相对于整个图片的位置  而不是相对当前格子
+            # 假设当前格子为(3,3)，当前格子的预测边界框为(x0,y0)，则计算坐标(x,y) = ((x0,y0)+(3,3))/7
             predict_boxes_tran = tf.stack(
                 [(predict_boxes[..., 0] + offset) / self.cell_size,
                  (predict_boxes[..., 1] + offset_tran) / self.cell_size,
                  tf.square(predict_boxes[..., 2]),
                  tf.square(predict_boxes[..., 3])], axis=-1)
 
+            # 计算每个格子预测边界框与真实边界框之间的IOU  [45,7,7,2]
             iou_predict_truth = self.calc_iou(predict_boxes_tran, boxes)
 
             # calculate I tensor [BATCH_SIZE, CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
@@ -239,6 +255,13 @@ class YOLONet(object):
                 (iou_predict_truth >= object_mask), tf.float32) * response
 
             # calculate no_I tensor [CELL_SIZE, CELL_SIZE, BOXES_PER_CELL]
+            # 这个是求论文中的1ijobj参数，[45,7,7,2]     1ijobj：表示网格单元i的第j个编辑框预测器’负责‘该预测
+            # 先计算每个框交并比最大的那个，因为我们知道，YOLO每个格子预测两个边界框，一个类别。在训练时，每个目标只需要
+            # 一个预测器来负责，我们指定一个预测器"负责"，根据哪个预测器与真实值之间具有当前最高的IOU来预测目标。
+            # 所以object_mask就表示每个格子中的哪个边界框负责该格子中目标预测？哪个边界框取值为1，哪个边界框就负责目标预测
+            # 当格子中的确有目标时，取值为[1,1]，[1,0],[0,1]
+            # 比如某一个格子的值为[1,0]，表示第一个边界框负责该格子目标的预测  [0,1]：表示第二个边界框负责该格子目标的预测
+            # 当格子没有目标时，取值为[0,0]
             noobject_mask = tf.ones_like(
                 object_mask, dtype=tf.float32) - object_mask
 
