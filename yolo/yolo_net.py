@@ -159,19 +159,31 @@ class YOLONet(object):
                                 axis=-1)
 
             # calculate the left up point & right down point
-            lu = tf.maximum(boxes1_t[..., :2], boxes2_t[..., :2])
-            rd = tf.minimum(boxes1_t[..., 2:], boxes2_t[..., 2:])
+            # 注意此坐标系 坐标原点 为左上角！！！
+            # lu和rd就是分别求两个框相交的矩形的左上角的坐标和右下角的坐标，因为对于左上角，
+            # 选择的是x和y较大的，而右下角是选择较小的，可以想想两个矩形框相交是不是这中情况
+            lu = tf.maximum(boxes1_t[..., :2], boxes2_t[..., :2])  # lu(left up) 两个框相交的矩形的左上角(x1,y1)
+            rd = tf.minimum(boxes1_t[..., 2:], boxes2_t[..., 2:])  # rd(right down) 两个框相交的矩形的右下角(x2,y2)
 
             # intersection
+            # 这个就是求相交矩形的长和宽，所以有rd-lu，相当于x1-x2和y1-y2，
+            # 之所以外面还要加一个tf.maximum是因为删除那些不合理的框，比如两个框没交集，
+            # 就会出现左上角坐标比右下角还大。
             intersection = tf.maximum(0.0, rd - lu)
+            # inter_square这个就是求面积了，就是长乘以宽。
             inter_square = intersection[..., 0] * intersection[..., 1]
 
             # calculate the boxs1 square and boxs2 square
+            # square1和square2这个就是求面积了，因为之前是中心点坐标和长和宽，所以这里直接用长和宽
             square1 = boxes1[..., 2] * boxes1[..., 3]
             square2 = boxes2[..., 2] * boxes2[..., 3]
 
+            # union_square就是就两个框的交面积，因为如果两个框的面积相加，那就会重复了相交的部分，
+            # 所以减去相交的部分，外面有个tf.maximum这个就是保证相交面积不为0,因为后面要做分母。
             union_square = tf.maximum(square1 + square2 - inter_square, 1e-10)
 
+        # 最后有一个tf.clip_by_value,这个是将如果你的交并比大于1,那么就让它等于1,如果小于0,那么就
+        # 让他变为0,因为交并比在0-1之间。
         return tf.clip_by_value(inter_square / union_square, 0.0, 1.0)
 
     def loss_layer(self, predicts, labels, scope='loss_layer'):
