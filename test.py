@@ -286,6 +286,7 @@ def main():
     # detector.image_detector(imname)
 
     # detect from camera
+    # GTX 1060 25fps
     detector.camera_detector()
 
 
