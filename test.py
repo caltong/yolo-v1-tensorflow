@@ -284,6 +284,8 @@ def main():
     # detect from image file
     # imname = 'test/person.jpg'
     # detector.image_detector(imname)
+
+    # detect from camera
     detector.camera_detector()
 
 
