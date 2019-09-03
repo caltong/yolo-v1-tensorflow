@@ -123,7 +123,7 @@ class Solver(object):
                 self.sess.run(self.train_op, feed_dict=feed_dict)  # 开始迭代训练，每一次迭代后global_step自加1
                 train_timer.toc()  # 计算这次迭代训练所使用的时间
 
-            # 没迭代save_iter次，保存一次模型
+            # 每迭代save_iter次，保存一次模型
             if step % self.save_iter == 0:
                 print('{} Saving checkpoint file to: {}'.format(
                     datetime.datetime.now().strftime('%m-%d %H:%M:%S'),
