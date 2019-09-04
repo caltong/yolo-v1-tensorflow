@@ -28,7 +28,9 @@ class Solver(object):
         """
         self.net = net  # yolo网络
         self.data = data  # voc2007数据处理
-        self.weights_file = cfg.WEIGHTS_FILE  # 检查点文件路径
+        self.weights_dir = cfg.WEIGHTS_DIR  # 检查点文件存放路径
+        self.meta_file = cfg.WEIGHTS_META  # META文件名
+        self.weights_file = cfg.WEIGHTS_FILE  # 检查点文件路径 /data/weight/YOLO_small.ckpt
         self.max_iter = cfg.MAX_ITER  # 训练最大迭代次数
         self.initial_learning_rate = cfg.LEARNING_RATE  # 初始学习率
         self.decay_steps = cfg.DECAY_STEPS  # 退化学习率衰减步数
@@ -43,7 +45,8 @@ class Solver(object):
         self.save_cfg()  # 保存配置信息
 
         self.variable_to_restore = tf.global_variables()  # 创建变量，保存当前迭代次数
-        self.saver = tf.train.Saver(self.variable_to_restore, max_to_keep=None)  # 退化学习率
+        # self.saver = tf.train.Saver(self.variable_to_restore, max_to_keep=None)
+
         self.ckpt_file = os.path.join(self.output_dir, 'yolo')  # 指定保存的模型名称
         self.summary_op = tf.summary.merge_all()  # 合并所有的summary
         self.writer = tf.summary.FileWriter(self.output_dir, flush_secs=60)  # 创建writer，指定日志文件路径，用于写日志文件
@@ -64,8 +67,9 @@ class Solver(object):
 
         # 恢复模型
         if self.weights_file is not None:
-            print('Restoring weights from: ' + self.weights_file)
-            self.saver.restore(self.sess, self.weights_file)
+            print('Restoring weights from: ' + self.weights_dir)
+            self.saver = tf.train.import_meta_graph(os.path.join(self.weights_dir, self.meta_file))
+            self.saver.restore(self.sess, tf.train.latest_checkpoint(self.weights_dir))
 
         self.writer.add_graph(self.sess.graph)  # 将图写入日志文件
 
@@ -98,15 +102,12 @@ class Solver(object):
 
                     # 输出信息
                     log_str = '{} Epoch: {}, Step: {}, Learning rate: {},Loss: {:5.3f}\nSpeed: {:.3f}s/iter,' \
-                              'Load: {:.3f}s/iter, Remain: {}'.format(
-                                datetime.datetime.now(),
-                                self.data.epoch,
-                                int(step),
-                                round(self.learning_rate.eval(session=self.sess), 6),
-                                loss,
-                                train_timer.average_time,
-                                load_timer.average_time,
-                                train_timer.remain(step, self.max_iter))
+                              'Load: {:.3f}s/iter, Remain: {}'.format(datetime.datetime.now(), self.data.epoch,
+                                                                      int(step),
+                                                                      round(self.learning_rate.eval(session=self.sess),
+                                                                            6), loss, train_timer.average_time,
+                                                                      load_timer.average_time,
+                                                                      train_timer.remain(step, self.max_iter))
                     print(log_str)
 
                 else:

@@ -13,10 +13,11 @@ CACHE_PATH = os.path.join(PASCAL_PATH, 'cache')  # 保存生成的数据集标�
 
 OUTPUT_DIR = os.path.join(PASCAL_PATH, 'output')  # 保存生成的网络模型和日志所在文件夹
 
-WEIGHTS_DIR = os.path.join(PASCAL_PATH, 'weights')  # 检查点文件所在目录
+WEIGHTS_DIR = os.path.join(DATA_PATH, 'weights')  # 检查点文件所在目录
 
+WEIGHTS_META = 'YOLO.meta'
 # WEIGHTS_FILE = None
-WEIGHTS_FILE = os.path.join(DATA_PATH, 'weights', 'YOLO_small.ckpt')
+WEIGHTS_FILE = os.path.join(DATA_PATH, 'weights', 'YOLO_small.ckpt')  # /data/weight/YOLO_small.ckpt
 
 CLASSES = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus',
            'car', 'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
